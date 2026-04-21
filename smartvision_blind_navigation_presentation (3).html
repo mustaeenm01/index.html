@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartVision — TinyML Blind Navigation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#02060f;--s1:#060d1a;--card:#0a1628;--border:#142040;
+  --c:#00f5ff;--b:#4f8ef7;--g:#00e87a;--a:#ffb830;--p:#bf5fff;--r:#ff4560;
+  --t:#ddeeff;--m:#5a7a9a;
+  --font-head:'Orbitron',monospace;--font-body:'Exo 2',sans-serif;
+}
+html,body{height:100%;background:var(--bg);color:var(--t);font-family:var(--font-body);overflow:hidden}
+.stage{position:relative;width:100vw;height:100vh;overflow:hidden}
+.scene{position:absolute;inset:0;bottom:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;pointer-events:none;z-index:10;transition:opacity .6s,transform .6s;transform:translateY(30px)}
+.scene.active{opacity:1;pointer-events:all;transform:translateY(0)}
+.scene.out{opacity:0;transform:translateY(-30px);transition:opacity .35s,transform .35s}
+/* NAV */
+.nav-bar{position:fixed;bottom:0;left:0;right:0;height:64px;background:rgba(6,13,26,.95);border-top:1px solid rgba(0,245,255,.1);display:flex;align-items:center;justify-content:center;gap:14px;z-index:500;backdrop-filter:blur(16px)}
+.nb{background:rgba(79,142,247,.1);border:1px solid rgba(79,142,247,.28);color:var(--b);padding:8px 18px;border-radius:8px;font-family:var(--font-head);font-size:10px;cursor:pointer;transition:all .2s;letter-spacing:.06em}
+.nb:hover{background:rgba(79,142,247,.22);transform:translateY(-2px)}
+.nb.play{background:rgba(0,232,122,.08);border-color:rgba(0,232,122,.3);color:var(--g)}
+.nb.playing{background:rgba(255,184,48,.1);border-color:var(--a);color:var(--a)}
+.sinfo{font-family:var(--font-head);font-size:9px;color:var(--m);text-align:center;line-height:1.7;min-width:110px}
+/* DOTS */
+.dots{position:fixed;right:16px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:9px;z-index:500}
+.dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.1);cursor:pointer;transition:all .3s}
+.dot.active{background:var(--c);box-shadow:0 0 10px var(--c)}
+/* PROGRESS */
+.prog{position:fixed;top:0;left:0;height:2px;background:linear-gradient(90deg,var(--c),var(--b),var(--p));z-index:600;transition:width .5s}
+/* SHARED */
+.card{background:rgba(10,22,40,.88);border:1px solid var(--border);border-radius:12px;backdrop-filter:blur(8px)}
+.chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-head);font-size:9px;padding:5px 12px;border-radius:20px;border:1px solid;letter-spacing:.06em}
+.glow{font-family:var(--font-head);letter-spacing:.08em;text-shadow:0 0 28px currentColor}
+.stag{font-family:var(--font-head);font-size:9px;letter-spacing:.15em;color:var(--m);text-transform:uppercase;margin-bottom:10px}
+.fsu{animation:fsuin .7s cubic-bezier(.2,1,.3,1) both}
+@keyframes fsuin{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.spec-item{display:flex;align-items:center;gap:10px;padding:9px 12px;background:rgba(0,245,255,.03);border:1px solid rgba(0,245,255,.08);border-radius:8px;margin-bottom:7px}
+.spec-label{font-family:var(--font-head);font-size:8px;color:var(--m);letter-spacing:.07em;min-width:78px}
+.spec-val{font-family:var(--font-head);font-size:12px;font-weight:700;min-width:60px}
+.spec-bar{flex:1;height:3px;background:rgba(255,255,255,.07);border-radius:2px;overflow:hidden}
+.spec-fill{height:100%;border-radius:2px;animation:sfp 3s ease-in-out infinite}
+@keyframes sfp{0%,100%{opacity:.7}50%{opacity:1}}
+.mlay{display:flex;gap:28px;align-items:center;width:860px}
+.mtitle{font-family:var(--font-head);font-size:20px;font-weight:700;margin-bottom:8px}
+.mdesc{font-size:12px;color:rgba(221,238,255,.6);line-height:1.7;margin-bottom:16px}
+/* scanline */
+.scanline{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,rgba(0,245,255,.25),transparent);animation:scl 3.5s linear infinite;pointer-events:none;z-index:4}
+@keyframes scl{0%{top:-5%}100%{top:105%}}
+/* pv2 */
+.pv2{display:flex;align-items:stretch;gap:0}
+.pv2-s{display:flex;flex-direction:column;align-items:center;flex:1}
+.pv2-box{padding:13px 8px;border-radius:10px;text-align:center;font-family:var(--font-head);font-size:8.5px;font-weight:700;letter-spacing:.04em;border:1px solid;width:100%;cursor:pointer;transition:all .3s;position:relative;overflow:hidden}
+.pv2-box:hover{transform:translateY(-4px);filter:brightness(1.3)}
+.pv2-box::before{content:'';position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,.05),transparent);pointer-events:none}
+.pv2-conn{width:28px;height:2px;align-self:center;position:relative;overflow:visible;flex-shrink:0}
+.pv2-pkt{position:absolute;top:-3px;width:8px;height:7px;border-radius:3px;animation:pkt 2s linear infinite}
+@keyframes pkt{0%{left:-10px;opacity:0}15%{opacity:1}85%{opacity:1}100%{left:calc(100% + 4px);opacity:0}}
+.pv2-lbl{font-size:8.5px;font-family:var(--font-body);color:var(--m);margin-top:5px;text-align:center;line-height:1.3}
+/* HERO */
+#s1 canvas{position:absolute;inset:0;width:100%!important;height:100%!important}
+.hero-wrap{position:relative;z-index:5;text-align:center}
+.h-ring{width:200px;height:200px;margin:0 auto 20px;animation:fsuin 1s .1s both}
+.h-ring svg{width:100%;height:100%}
+.orb-a{transform-origin:100px 100px;animation:orbA 8s linear infinite}
+.orb-b{transform-origin:100px 100px;animation:orbB 5s linear infinite}
+@keyframes orbA{to{transform:rotate(360deg)}}
+@keyframes orbB{to{transform:rotate(-360deg)}}
+.rpulse{animation:rp 2s ease-in-out infinite}
+@keyframes rp{0%,100%{opacity:.4;r:5}50%{opacity:1;r:8}}
+/* TIMINGS */
+.tgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;width:820px;margin-top:18px}
+.tcard{padding:12px;border-radius:10px;text-align:center}
+.tval{font-family:var(--font-head);font-size:18px;font-weight:700;margin-bottom:4px}
+.tlbl{font-size:10px;color:var(--m)}
+/* SUMMARY */
+.sum-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:13px;width:820px}
+.scard{padding:16px 18px;border-radius:14px;transition:transform .3s;cursor:default;position:relative;overflow:hidden}
+.scard:hover{transform:translateY(-5px)}
+.scard::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,.04),transparent);pointer-events:none}
+.scard .icon{font-size:26px;margin-bottom:8px}
+.scard h4{font-family:var(--font-head);font-size:9.5px;letter-spacing:.1em;margin-bottom:5px}
+.scard p{font-size:10.5px;color:rgba(221,238,255,.6);line-height:1.6}
+.sstat{display:inline-block;margin-top:7px;font-family:var(--font-head);font-size:8.5px;padding:3px 9px;border-radius:20px;border:1px solid}
+/* HUD */
+.hud-panel{padding:9px 12px;border-radius:8px;font-family:var(--font-head);font-size:8px}
+.hud-val{font-size:15px;font-weight:700;margin-top:3px}
+.hud-bar{height:4px;border-radius:2px;margin-top:5px;background:rgba(255,255,255,.1);overflow:hidden}
+.hud-fill{height:100%;border-radius:2px;transition:width .4s}
+.demo-alert{position:absolute;bottom:80px;left:50%;transform:translateX(-50%);padding:9px 22px;border-radius:28px;font-family:var(--font-head);font-size:10px;letter-spacing:.1em;z-index:5;animation:dalert 1.2s ease-in-out infinite;white-space:nowrap}
+@keyframes dalert{0%,100%{opacity:1;transform:translateX(-50%) scale(1)}50%{opacity:.65;transform:translateX(-50%) scale(.98)}}
+/* blink */
+@keyframes blink2{0%,100%{opacity:1}50%{opacity:0}}
+canvas.scv{display:block;width:100%!important;height:100%!important}
+/* info cards s2 */
+.ic{padding:12px 15px;border-radius:10px}
+.ic h4{font-family:var(--font-head);font-size:9.5px;letter-spacing:.08em;margin-bottom:4px}
+.ic p{font-size:11px;color:rgba(221,238,255,.65);line-height:1.6}
+</style>
+</head>
+<body>
+<canvas id="ptcl" style="position:fixed;inset:0;z-index:1;pointer-events:none"></canvas>
+<div class="prog" id="prog" style="width:10%"></div>
+<div class="stage">
+
+<!-- S1: HERO -->
+<div class="scene active" id="s1">
+  <canvas id="hero3d" style="position:absolute;inset:0;bottom:0;z-index:2"></canvas>
+  <div class="scanline"></div>
+  <div class="hero-wrap">
+    <div class="h-ring">
+      <svg viewBox="0 0 200 200">
+        <defs><radialGradient id="rg0"><stop offset="0%" stop-color="#00f5ff" stop-opacity=".3"/><stop offset="100%" stop-color="#00f5ff" stop-opacity="0"/></radialGradient></defs>
+        <circle cx="100" cy="100" r="82" fill="none" stroke="rgba(0,245,255,.1)" stroke-width="1"/>
+        <circle cx="100" cy="100" r="60" fill="none" stroke="rgba(79,142,247,.12)" stroke-width="1" stroke-dasharray="4 6"/>
+        <circle cx="100" cy="100" r="40" fill="url(#rg0)"/>
+        <g class="orb-a"><circle cx="100" cy="18" r="6" fill="#00f5ff" opacity=".9"/><circle cx="182" cy="100" r="4" fill="#4f8ef7" opacity=".7"/></g>
+        <g class="orb-b"><circle cx="100" cy="182" r="5" fill="#00e87a" opacity=".8"/><circle cx="18" cy="100" r="4" fill="#bf5fff" opacity=".6"/></g>
+        <text x="100" y="96" font-family="Orbitron" font-size="9" fill="#00f5ff" text-anchor="middle">SMART</text>
+        <text x="100" y="112" font-family="Orbitron" font-size="9" fill="#4f8ef7" text-anchor="middle">VISION</text>
+        <circle class="rpulse" cx="100" cy="100" r="5" fill="#00f5ff"/>
+      </svg>
+    </div>
+    <div class="glow fsu" style="--d:0s;font-size:clamp(26px,4.5vw,50px);color:var(--c);animation-delay:.1s">SmartVision</div>
+    <div class="fsu" style="--d:.2s;font-size:14px;color:var(--m);letter-spacing:.2em;text-transform:uppercase;margin-top:10px;animation-delay:.2s">TinyML Blind Navigation System</div>
+    <div class="fsu" style="--d:.4s;display:flex;gap:9px;margin-top:22px;flex-wrap:wrap;justify-content:center;animation-delay:.4s">
+      <span class="chip" style="color:var(--c);border-color:rgba(0,245,255,.3);background:rgba(0,245,255,.05)">🔬 TinyML</span>
+      <span class="chip" style="color:var(--g);border-color:rgba(0,232,122,.3);background:rgba(0,232,122,.05)">📡 Ultrasonic</span>
+      <span class="chip" style="color:var(--a);border-color:rgba(255,184,48,.3);background:rgba(255,184,48,.05)">🛰 GPS</span>
+      <span class="chip" style="color:var(--p);border-color:rgba(191,95,255,.3);background:rgba(191,95,255,.05)">🧠 Edge AI</span>
+      <span class="chip" style="color:var(--r);border-color:rgba(255,69,96,.3);background:rgba(255,69,96,.05)">📳 Haptic</span>
+    </div>
+    <div class="fsu" style="--d:.6s;margin-top:14px;font-size:11px;color:var(--m);letter-spacing:.1em;animation-delay:.6s">10 MODULES · REAL-TIME · &lt;50ms RESPONSE</div>
+  </div>
+</div>
+
+<!-- S2: BLIND PERSON -->
+<div class="scene" id="s2">
+  <canvas id="person3d" class="scv" style="position:absolute;inset:0;bottom:0;z-index:2"></canvas>
+  <div class="fsu" style="--d:.2s;position:absolute;left:52px;top:42%;transform:translateY(-50%);z-index:5">
+    <div class="stag">Module 01</div>
+    <div class="glow" style="color:var(--c);font-size:20px">The User</div>
+    <p style="font-size:11px;color:var(--m);margin-top:10px;max-width:210px;line-height:1.7">A visually impaired person navigating the world — SmartVision goggles work silently in real time.</p>
+  </div>
+  <div style="position:absolute;right:52px;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;gap:10px;width:230px">
+    <div class="card ic fsu" style="--d:.3s;border-color:rgba(0,245,255,.15)"><h4 style="color:var(--c)">Walking</h4><p>Sensors sweep a 4m cone at 40kHz constantly — 20 times per second</p></div>
+    <div class="card ic fsu" style="--d:.45s;border-color:rgba(0,232,122,.15)"><h4 style="color:var(--g)">Listening</h4><p>TTS audio cues guide navigation and warn of hazards ahead</p></div>
+    <div class="card ic fsu" style="--d:.6s;border-color:rgba(255,69,96,.15)"><h4 style="color:var(--r)">Feeling</h4><p>Haptic motor pulses encode distance &amp; direction on the wrist</p></div>
+    <div class="card ic fsu" style="--d:.75s;border-color:rgba(191,95,255,.15)"><h4 style="color:var(--p)">Navigating</h4><p>GPS + OSM turn-by-turn voice guidance to any destination</p></div>
+  </div>
+</div>
+
+<!-- S3: ULTRASONIC -->
+<div class="scene" id="s3">
+  <div class="stag fsu" style="--d:0s">Module 02 — Input Sensor</div>
+  <div class="mlay fsu" style="--d:.12s">
+    <div style="width:330px;height:330px;flex-shrink:0;border-radius:14px;overflow:hidden;background:rgba(0,30,60,.12);border:1px solid rgba(0,245,255,.1);position:relative">
+      <canvas id="us3d" class="scv"></canvas>
+      <div style="position:absolute;bottom:10px;left:12px;font-family:var(--font-head);font-size:7.5px;color:rgba(0,245,255,.55)">HC-SR04 · 40kHz ULTRASONIC</div>
+    </div>
+    <div style="flex:1">
+      <div class="mtitle" style="color:var(--c)">Ultrasonic Sensor</div>
+      <div class="mdesc">Emits 40kHz ultrasonic bursts that bounce off obstacles and return. Time-of-flight measurement converts to distance with millimetre accuracy — up to 4 metres, 20 scans per second.</div>
+      <div class="spec-item"><span class="spec-label">FREQUENCY</span><span class="spec-val" style="color:var(--c)">40 kHz</span><div class="spec-bar"><div class="spec-fill" style="width:90%;background:var(--c)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">RANGE</span><span class="spec-val" style="color:var(--g)">4 m</span><div class="spec-bar"><div class="spec-fill" style="width:75%;background:var(--g)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">ACCURACY</span><span class="spec-val" style="color:var(--a)">±3 mm</span><div class="spec-bar"><div class="spec-fill" style="width:95%;background:var(--a)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">SCAN RATE</span><span class="spec-val" style="color:var(--p)">20 Hz</span><div class="spec-bar"><div class="spec-fill" style="width:55%;background:var(--p)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">BEAM ANGLE</span><span class="spec-val" style="color:var(--b)">15°</span><div class="spec-bar"><div class="spec-fill" style="width:30%;background:var(--b)"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S4: CAMERA -->
+<div class="scene" id="s4">
+  <div class="stag fsu" style="--d:0s">Module 03 — Visual Input</div>
+  <div class="mlay fsu" style="--d:.12s">
+    <div style="width:350px;height:290px;flex-shrink:0;border-radius:12px;overflow:hidden;border:1px solid rgba(0,232,122,.2);position:relative;background:#000">
+      <canvas id="cam3d" class="scv"></canvas>
+      <div style="position:absolute;top:10px;left:10px;display:flex;align-items:center;gap:5px"><div style="width:7px;height:7px;border-radius:50%;background:var(--r);animation:blink2 1s step-end infinite"></div><span style="font-family:var(--font-head);font-size:7.5px;color:var(--r)">LIVE · 30FPS</span></div>
+      <div style="position:absolute;bottom:9px;right:9px;font-family:var(--font-head);font-size:7.5px;color:var(--g)">OV5647 · HD · CSI</div>
+    </div>
+    <div style="flex:1">
+      <div class="mtitle" style="color:var(--g)">OV5647 Camera Module</div>
+      <div class="mdesc">Streams 30fps HD video into TFLite Micro for real-time object detection. Identifies 12 obstacle classes — people, vehicles, stairs, doors, furniture — at up to 5 metres with confidence scoring.</div>
+      <div class="spec-item"><span class="spec-label">RESOLUTION</span><span class="spec-val" style="color:var(--g)">720p HD</span><div class="spec-bar"><div class="spec-fill" style="width:70%;background:var(--g)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">FRAME RATE</span><span class="spec-val" style="color:var(--c)">30 fps</span><div class="spec-bar"><div class="spec-fill" style="width:60%;background:var(--c)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">OBJ CLASSES</span><span class="spec-val" style="color:var(--a)">12 types</span><div class="spec-bar"><div class="spec-fill" style="width:55%;background:var(--a)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">DETECT RANGE</span><span class="spec-val" style="color:var(--p)">5 m</span><div class="spec-bar"><div class="spec-fill" style="width:85%;background:var(--p)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">INTERFACE</span><span class="spec-val" style="color:var(--b)">CSI-2</span><div class="spec-bar"><div class="spec-fill" style="width:40%;background:var(--b)"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S5: GPS -->
+<div class="scene" id="s5">
+  <div class="stag fsu" style="--d:0s">Module 04 — Location Input</div>
+  <div class="mlay fsu" style="--d:.12s">
+    <div style="width:330px;height:330px;flex-shrink:0;border-radius:14px;overflow:hidden;border:1px solid rgba(255,184,48,.15);position:relative">
+      <canvas id="gps3d" class="scv"></canvas>
+    </div>
+    <div style="flex:1">
+      <div class="mtitle" style="color:var(--a)">GPS Module — NEO-6M</div>
+      <div class="mdesc">Receives signals from 12+ satellites to compute real-world position within ±2 metres. NMEA sentences feed a pedestrian routing engine — turn-by-turn directions are synthesised to speech.</div>
+      <div class="spec-item"><span class="spec-label">ACCURACY</span><span class="spec-val" style="color:var(--a)">±2 m</span><div class="spec-bar"><div class="spec-fill" style="width:88%;background:var(--a)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">SATELLITES</span><span class="spec-val" style="color:var(--c)">12+</span><div class="spec-bar"><div class="spec-fill" style="width:90%;background:var(--c)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">UPDATE RATE</span><span class="spec-val" style="color:var(--g)">1 Hz</span><div class="spec-bar"><div class="spec-fill" style="width:30%;background:var(--g)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">PROTOCOL</span><span class="spec-val" style="color:var(--p)">NMEA</span><div class="spec-bar"><div class="spec-fill" style="width:50%;background:var(--p)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">INTERFACE</span><span class="spec-val" style="color:var(--b)">UART</span><div class="spec-bar"><div class="spec-fill" style="width:40%;background:var(--b)"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S6: TINYML -->
+<div class="scene" id="s6">
+  <div class="stag fsu" style="--d:0s">Module 05 — Edge Processing</div>
+  <div class="mlay fsu" style="--d:.12s">
+    <div style="width:350px;height:310px;flex-shrink:0;border-radius:14px;overflow:hidden;border:1px solid rgba(191,95,255,.2);position:relative">
+      <canvas id="tml3d" class="scv"></canvas>
+      <div style="position:absolute;top:9px;left:11px;font-family:var(--font-head);font-size:7.5px;color:rgba(191,95,255,.75)">NANO 33 BLE SENSE · CORTEX-M4</div>
+    </div>
+    <div style="flex:1">
+      <div class="mtitle" style="color:var(--p)">TinyML Core</div>
+      <div class="mdesc">Arduino Nano 33 BLE Sense runs a quantized INT8 TFLite Micro neural network entirely on its Cortex-M4 — no cloud, no external compute. Edge Impulse handles DSP feature extraction and INT8 inference in under 30ms per frame.</div>
+      <div class="spec-item"><span class="spec-label">MCU</span><span class="spec-val" style="color:var(--p)">Cortex-M4</span><div class="spec-bar"><div class="spec-fill" style="width:75%;background:var(--p)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">FLASH</span><span class="spec-val" style="color:var(--c)">1 MB</span><div class="spec-bar"><div class="spec-fill" style="width:50%;background:var(--c)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">RAM</span><span class="spec-val" style="color:var(--g)">256 KB</span><div class="spec-bar"><div class="spec-fill" style="width:40%;background:var(--g)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">INFERENCE</span><span class="spec-val" style="color:var(--a)">&lt;30 ms</span><div class="spec-bar"><div class="spec-fill" style="width:85%;background:var(--a)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">QUANTIZE</span><span class="spec-val" style="color:var(--b)">INT8</span><div class="spec-bar"><div class="spec-fill" style="width:95%;background:var(--b)"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S7: HAPTIC + AUDIO OUTPUT -->
+<div class="scene" id="s7">
+  <div class="stag fsu" style="--d:0s">Module 06 — Output</div>
+  <div class="mlay fsu" style="--d:.12s">
+    <div style="width:330px;height:310px;flex-shrink:0;border-radius:14px;overflow:hidden;border:1px solid rgba(255,69,96,.18);position:relative;background:rgba(20,0,10,.5)">
+      <canvas id="hap3d" class="scv"></canvas>
+    </div>
+    <div style="flex:1">
+      <div class="mtitle" style="color:var(--r)">Haptic + Audio Output</div>
+      <div class="mdesc">An ERM vibration motor encodes proximity as pulse frequency — fast bursts mean danger is close. A PWM-driven speaker synthesises TTS navigation cues. Both share a priority queue so alerts never collide.</div>
+      <div class="spec-item"><span class="spec-label">HAPTIC TYPE</span><span class="spec-val" style="color:var(--r)">ERM Motor</span><div class="spec-bar"><div class="spec-fill" style="width:80%;background:var(--r)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">PATTERNS</span><span class="spec-val" style="color:var(--a)">8 modes</span><div class="spec-bar"><div class="spec-fill" style="width:60%;background:var(--a)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">AUDIO</span><span class="spec-val" style="color:var(--p)">TTS PWM</span><div class="spec-bar"><div class="spec-fill" style="width:75%;background:var(--p)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">LATENCY</span><span class="spec-val" style="color:var(--g)">&lt;10 ms</span><div class="spec-bar"><div class="spec-fill" style="width:92%;background:var(--g)"></div></div></div>
+      <div class="spec-item"><span class="spec-label">PRIORITY Q</span><span class="spec-val" style="color:var(--c)">Active</span><div class="spec-bar"><div class="spec-fill" style="width:100%;background:var(--c)"></div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S8: SIGNAL FLOW -->
+<div class="scene" id="s8">
+  <div class="stag fsu" style="--d:0s">Module 07 — Signal Pipeline</div>
+  <div class="fsu" style="--d:.1s;width:820px">
+    <div class="glow" style="color:var(--c);font-size:17px;margin-bottom:18px">End-to-End Signal Flow</div>
+    <div class="pv2">
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(0,245,255,.4);color:var(--c);background:rgba(0,245,255,.06)">SENSOR<br>INPUT</div><div class="pv2-lbl">Ultrasonic<br>+ Camera</div></div>
+      <div class="pv2-conn" style="background:linear-gradient(90deg,rgba(0,245,255,.4),rgba(79,142,247,.4))"><div class="pv2-pkt" style="background:var(--c)"></div></div>
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(79,142,247,.4);color:var(--b);background:rgba(79,142,247,.06)">I2C/SPI<br>BRIDGE</div><div class="pv2-lbl">Hardware<br>Interface</div></div>
+      <div class="pv2-conn" style="background:linear-gradient(90deg,rgba(79,142,247,.4),rgba(191,95,255,.4))"><div class="pv2-pkt" style="background:var(--b);animation-delay:.35s"></div></div>
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(191,95,255,.4);color:var(--p);background:rgba(191,95,255,.06)">DSP<br>FEATURES</div><div class="pv2-lbl">Edge Impulse<br>Pipeline</div></div>
+      <div class="pv2-conn" style="background:linear-gradient(90deg,rgba(191,95,255,.4),rgba(255,184,48,.4))"><div class="pv2-pkt" style="background:var(--p);animation-delay:.7s"></div></div>
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(255,184,48,.4);color:var(--a);background:rgba(255,184,48,.06)">INT8<br>INFER</div><div class="pv2-lbl">TFLite Micro<br>Neural Net</div></div>
+      <div class="pv2-conn" style="background:linear-gradient(90deg,rgba(255,184,48,.4),rgba(0,232,122,.4))"><div class="pv2-pkt" style="background:var(--a);animation-delay:1.05s"></div></div>
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(0,232,122,.4);color:var(--g);background:rgba(0,232,122,.06)">DECISION<br>ENGINE</div><div class="pv2-lbl">Priority &amp;<br>Routing</div></div>
+      <div class="pv2-conn" style="background:linear-gradient(90deg,rgba(0,232,122,.4),rgba(255,69,96,.4))"><div class="pv2-pkt" style="background:var(--g);animation-delay:1.4s"></div></div>
+      <div class="pv2-s"><div class="pv2-box" style="border-color:rgba(255,69,96,.4);color:var(--r);background:rgba(255,69,96,.06)">ALERT<br>OUTPUT</div><div class="pv2-lbl">Haptic +<br>Audio</div></div>
+    </div>
+    <div class="tgrid">
+      <div class="tcard card" style="border-color:rgba(0,245,255,.15)"><div class="tval" style="color:var(--c)">40kHz</div><div class="tlbl">Ultrasonic Freq</div></div>
+      <div class="tcard card" style="border-color:rgba(0,232,122,.15)"><div class="tval" style="color:var(--g)">30fps</div><div class="tlbl">Camera Rate</div></div>
+      <div class="tcard card" style="border-color:rgba(191,95,255,.15)"><div class="tval" style="color:var(--p)">&lt;30ms</div><div class="tlbl">ML Inference</div></div>
+      <div class="tcard card" style="border-color:rgba(255,184,48,.15)"><div class="tval" style="color:var(--a)">&lt;10ms</div><div class="tlbl">Output Latency</div></div>
+      <div class="tcard card" style="border-color:rgba(255,69,96,.15)"><div class="tval" style="color:var(--r)">&lt;50ms</div><div class="tlbl">End-to-End</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- S9: LIVE DEMO -->
+<div class="scene" id="s9">
+  <canvas id="demo3d" class="scv" style="position:absolute;inset:0;bottom:0;z-index:2"></canvas>
+  <div class="stag" style="position:absolute;top:18px;left:50%;transform:translateX(-50%);z-index:5">Module 08 — Live Detection Demo</div>
+  <div style="position:absolute;top:50px;right:52px;z-index:5;display:flex;flex-direction:column;gap:9px;width:210px">
+    <div class="hud-panel card" style="border-color:rgba(255,69,96,.2)">
+      <div style="color:var(--m)">OBSTACLE DISTANCE</div>
+      <div class="hud-val" style="color:var(--r)" id="dDist">0.8 m</div>
+      <div class="hud-bar"><div class="hud-fill" id="dDistB" style="background:var(--r);width:65%"></div></div>
+    </div>
+    <div class="hud-panel card" style="border-color:rgba(0,232,122,.2)">
+      <div style="color:var(--m)">CONFIDENCE</div>
+      <div class="hud-val" style="color:var(--g)" id="dConf">94%</div>
+      <div class="hud-bar"><div class="hud-fill" id="dConfB" style="background:var(--g);width:94%"></div></div>
+    </div>
+    <div class="hud-panel card" style="border-color:rgba(191,95,255,.2)">
+      <div style="color:var(--m)">DETECTED CLASS</div>
+      <div class="hud-val" style="color:var(--p);font-size:13px" id="dLabel">CHAIR</div>
+    </div>
+    <div class="hud-panel card" style="border-color:rgba(255,184,48,.2)">
+      <div style="color:var(--m)">HAPTIC PATTERN</div>
+      <div class="hud-val" style="color:var(--a);font-size:11px" id="dHaptic">● ● ●  FAST PULSE</div>
+    </div>
+  </div>
+  <div class="demo-alert" style="background:rgba(255,69,96,.1);border:1px solid rgba(255,69,96,.45);color:var(--r)">⚠ OBSTACLE DETECTED · LEFT TURN ADVISED</div>
+</div>
+
+<!-- S10: SUMMARY -->
+<div class="scene" id="s10">
+  <div class="stag fsu" style="--d:0s">Module 09 — System Summary</div>
+  <div class="glow fsu" style="--d:.08s;color:var(--c);font-size:18px;margin-bottom:18px">SmartVision · Complete System Overview</div>
+  <div class="sum-grid fsu" style="--d:.16s">
+    <div class="scard card" style="border-color:rgba(0,245,255,.2)"><div class="icon">🔬</div><h4 style="color:var(--c)">TINYML CORE</h4><p>Nano 33 BLE Sense — TFLite Micro INT8 inference entirely on-chip, no cloud dependency.</p><span class="sstat" style="color:var(--c);border-color:rgba(0,245,255,.3)">Cortex-M4 · 256KB</span></div>
+    <div class="scard card" style="border-color:rgba(0,232,122,.2)"><div class="icon">📡</div><h4 style="color:var(--g)">ULTRASONIC</h4><p>HC-SR04 at 40kHz — sweeps a 4m obstacle cone 20 times per second with ±3mm accuracy.</p><span class="sstat" style="color:var(--g);border-color:rgba(0,232,122,.3)">40kHz · ±3mm</span></div>
+    <div class="scard card" style="border-color:rgba(79,142,247,.2)"><div class="icon">📷</div><h4 style="color:var(--b)">CAMERA</h4><p>OV5647 streams 30fps into Edge Impulse — 12 obstacle classes detected up to 5 metres.</p><span class="sstat" style="color:var(--b);border-color:rgba(79,142,247,.3)">720p · 30fps</span></div>
+    <div class="scard card" style="border-color:rgba(255,184,48,.2)"><div class="icon">🛰</div><h4 style="color:var(--a)">GPS</h4><p>NEO-6M locks 12+ satellites for ±2m accuracy — NMEA feeds OSM pedestrian routing.</p><span class="sstat" style="color:var(--a);border-color:rgba(255,184,48,.3)">±2m · OSM</span></div>
+    <div class="scard card" style="border-color:rgba(255,69,96,.2)"><div class="icon">📳</div><h4 style="color:var(--r)">HAPTIC + AUDIO</h4><p>ERM motor with 8 vibration patterns + PWM TTS speaker on a shared priority queue.</p><span class="sstat" style="color:var(--r);border-color:rgba(255,69,96,.3)">8 patterns · &lt;10ms</span></div>
+    <div class="scard card" style="border-color:rgba(191,95,255,.2)"><div class="icon">⚡</div><h4 style="color:var(--p)">PIPELINE</h4><p>DSP → INT8 inference → priority queue → alert output in under 50ms end-to-end.</p><span class="sstat" style="color:var(--p);border-color:rgba(191,95,255,.3)">&lt;50ms E2E</span></div>
+  </div>
+</div>
+
+<!-- NAV DOTS -->
+<div class="dots" id="dots"></div>
+
+<!-- NAV BAR -->
+<div class="nav-bar">
+  <button class="nb" onclick="prev()">← PREV</button>
+  <div class="sinfo" id="si"><span id="sn">01/10</span><br><span id="sl" style="color:var(--c)">Hero</span></div>
+  <button class="nb" onclick="next()">NEXT →</button>
+  <button class="nb play" id="pb" onclick="togglePlay()">▶ AUTO</button>
+</div>
+</div>
+
+<script>
+const SC=[
+  {id:'s1',name:'Hero'},
+  {id:'s2',name:'Blind User'},
+  {id:'s3',name:'Ultrasonic'},
+  {id:'s4',name:'Camera'},
+  {id:'s5',name:'GPS'},
+  {id:'s6',name:'TinyML'},
+  {id:'s7',name:'Haptic'},
+  {id:'s8',name:'Signal Flow'},
+  {id:'s9',name:'Detection'},
+  {id:'s10',name:'Summary'},
+];
+let cur=0,playing=false,ptimer=null;
+const dotsEl=document.getElementById('dots');
+SC.forEach((s,i)=>{
+  const d=document.createElement('div');
+  d.className='dot'+(i===0?' active':'');
+  d.title=s.name;d.onclick=()=>goTo(i);dotsEl.appendChild(d);
+});
+function goTo(i){
+  const old=document.getElementById(SC[cur].id);
+  old.classList.add('out');
+  setTimeout(()=>old.classList.remove('active','out'),400);
+  cur=(i+SC.length)%SC.length;
+  const el=document.getElementById(SC[cur].id);
+  el.classList.add('active');
+  document.querySelectorAll('.dot').forEach((d,j)=>d.classList.toggle('active',j===cur));
+  document.getElementById('sn').textContent=String(cur+1).padStart(2,'0')+'/'+SC.length;
+  document.getElementById('sl').textContent=SC[cur].name;
+  document.getElementById('prog').style.width=((cur+1)/SC.length*100)+'%';
+  if(!inited.has(cur)){inited.add(cur);(builders[cur]||noOp)();}
+}
+function prev(){goTo(cur-1)}function next(){goTo(cur+1)}
+function togglePlay(){
+  playing=!playing;const pb=document.getElementById('pb');
+  if(playing){pb.textContent='⏸ PAUSE';pb.classList.add('playing');pb.classList.remove('play');ptimer=setInterval(()=>goTo(cur+1),5000);}
+  else{clearInterval(ptimer);pb.textContent='▶ AUTO';pb.classList.remove('playing');pb.classList.add('play');}
+}
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight')next();if(e.key==='ArrowLeft')prev();
+  if(e.key===' '){e.preventDefault();togglePlay();}
+});
+
+/* ── PARTICLES ── */
+(()=>{
+  const cv=document.getElementById('ptcl'),ctx=cv.getContext('2d');
+  function rsz(){cv.width=innerWidth;cv.height=innerHeight;}rsz();window.addEventListener('resize',rsz);
+  const pts=Array.from({length:70},()=>({x:Math.random()*innerWidth,y:Math.random()*innerHeight,vx:(Math.random()-.5)*.28,vy:(Math.random()-.5)*.28,r:Math.random()*1.4+.4,o:Math.random()*.4+.15}));
+  (function draw(){
+    ctx.clearRect(0,0,cv.width,cv.height);
+    pts.forEach(p=>{p.x+=p.vx;p.y+=p.vy;if(p.x<0||p.x>cv.width)p.vx*=-1;if(p.y<0||p.y>cv.height)p.vy*=-1;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fillStyle=`rgba(0,245,255,${p.o})`;ctx.fill();});
+    pts.forEach((a,i)=>pts.slice(i+1).forEach(b=>{const d=Math.hypot(a.x-b.x,a.y-b.y);if(d<110){ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.strokeStyle=`rgba(79,142,247,${(1-d/110)*.1})`;ctx.lineWidth=.5;ctx.stroke();}}));
+    requestAnimationFrame(draw);
+  })();
+})();
+
+/* ── THREE HELPERS ── */
+const noOp=()=>{};
+const inited=new Set([0]);
+
+function mkR(id,w,h){
+  const cv=document.getElementById(id);if(!cv)return null;
+  const r=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+  r.setPixelRatio(Math.min(devicePixelRatio,2));r.setSize(w,h);return r;
+}
+
+/* HERO */
+function bHero(){
+  const W=innerWidth,H=innerHeight;
+  const R=mkR('hero3d',W,H);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(60,W/H,.1,100);
+  cam.position.set(0,0,8);
+  const rings=[];
+  for(let i=0;i<5;i++){
+    const m=new THREE.Mesh(new THREE.TorusGeometry(1.5+i*.6,.015,8,80),new THREE.MeshBasicMaterial({color:new THREE.Color().setHSL(.55-i*.05,1,.6),transparent:true,opacity:.12+i*.04}));
+    m.rotation.x=Math.random();m.rotation.y=Math.random();rings.push(m);sc.add(m);
+  }
+  const sph=new THREE.Mesh(new THREE.SphereGeometry(.55,32,32),new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:.12}));sc.add(sph);
+  const dg=new THREE.SphereGeometry(.07,8,8);
+  const dots2=[[0x00f5ff,2.2,0],[0x4f8ef7,3,1.2],[0x00e87a,2.6,2.4],[0xbf5fff,2.8,3.6]].map(([col,r,ph])=>{
+    const d=new THREE.Mesh(dg,new THREE.MeshBasicMaterial({color:col}));d.userData={r,ph};sc.add(d);return d;
+  });
+  const pv=[];for(let i=0;i<400;i++){const t2=Math.random()*Math.PI*2,p=Math.acos(2*Math.random()-1),r2=3+Math.random()*4;pv.push(Math.sin(p)*Math.cos(t2)*r2,Math.cos(p)*r2,Math.sin(p)*Math.sin(t2)*r2);}
+  const pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.Float32BufferAttribute(pv,3));
+  sc.add(new THREE.Points(pg,new THREE.PointsMaterial({color:0x4f8ef7,size:.04,transparent:true,opacity:.45})));
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.008;rings.forEach((r,i)=>{r.rotation.x+=.003+i*.001;r.rotation.y+=.005+i*.001;});sph.material.opacity=.08+Math.sin(t)*.06;dots2.forEach(d=>{const a=t*.8+d.userData.ph;d.position.set(Math.cos(a)*d.userData.r,Math.sin(a*.5)*.8,Math.sin(a)*d.userData.r);});cam.position.x=Math.sin(t*.3)*1.5;cam.position.y=Math.sin(t*.2)*.5;cam.lookAt(0,0,0);R.render(sc,cam);})();
+}
+
+/* PERSON */
+function bPerson(){
+  const W=innerWidth,H=innerHeight-64;
+  const R=mkR('person3d',W,H);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,W/H,.1,100);
+  cam.position.set(0,1.4,6);
+  sc.add(new THREE.AmbientLight(0x223344,1.5));
+  const dl=new THREE.DirectionalLight(0x00f5ff,2);dl.position.set(2,5,3);sc.add(dl);
+  sc.add(new THREE.GridHelper(20,30,0x142040,0x0d1e35)).position.y=-1.8;
+  const bm=new THREE.MeshLambertMaterial({color:0x1a3a6e}),hm=new THREE.MeshLambertMaterial({color:0x2a5a8e}),gm=new THREE.MeshLambertMaterial({color:0x00f5ff,emissive:0x00a0bb,emissiveIntensity:.5});
+  const head=new THREE.Mesh(new THREE.SphereGeometry(.22,16,16),hm);head.position.y=1.72;sc.add(head);
+  [[-.12,.2],[.12,-.2]].forEach(([x,ry])=>{const g=new THREE.Mesh(new THREE.TorusGeometry(.1,.03,8,20),gm);g.position.set(x,1.74,.2);g.rotation.y=ry;sc.add(g);});
+  const torso=new THREE.Mesh(new THREE.CylinderGeometry(.18,.2,.8,12),bm);torso.position.y=1.0;sc.add(torso);
+  const ll=new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.7,8),bm);ll.position.set(-.1,.22,0);sc.add(ll);
+  const rl=new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.7,8),bm);rl.position.set(.1,.22,0);sc.add(rl);
+  const al=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,.5,8),bm);al.position.set(-.22,.95,0);al.rotation.z=.3;sc.add(al);
+  const ar=new THREE.Mesh(new THREE.CylinderGeometry(.05,.05,.5,8),bm);ar.position.set(.22,.95,0);ar.rotation.z=-.3;sc.add(ar);
+  const caneM=new THREE.Mesh(new THREE.CylinderGeometry(.012,.012,1.8,6),new THREE.MeshLambertMaterial({color:0xffffff,transparent:true,opacity:.65}));
+  caneM.position.set(.35,.1,.2);caneM.rotation.z=.15;sc.add(caneM);
+  const waves2=Array.from({length:4},(_,i)=>{const w=new THREE.Mesh(new THREE.RingGeometry(.01,.02+i*.08,16),new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:.5-i*.1,side:THREE.DoubleSide}));w.rotation.x=Math.PI/2;w.position.set(0,1.72,.26);w.userData.i=i;sc.add(w);return w;});
+  const pd=Array.from({length:8},(_,i)=>{const p=new THREE.Mesh(new THREE.CircleGeometry(.06,8),new THREE.MeshBasicMaterial({color:0x00e87a,transparent:true,opacity:.7}));p.rotation.x=-Math.PI/2;p.position.set(Math.sin(i*.4)*.3,-1.79,-i*.8-1);sc.add(p);return p;});
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.015;ll.rotation.x=Math.sin(t*2)*.3;rl.rotation.x=Math.sin(t*2+Math.PI)*.3;al.rotation.x=Math.sin(t*2+Math.PI)*.2;ar.rotation.x=Math.sin(t*2)*.2;caneM.rotation.x=Math.sin(t)*.15;head.position.y=1.72+Math.sin(t*2)*.02;torso.position.y=1+Math.sin(t*2)*.015;waves2.forEach(w=>{const s=1+Math.sin(t*3+w.userData.i)*.3;w.scale.set(s,s,1);w.material.opacity=(.45-w.userData.i*.09)*(.5+.5*Math.abs(Math.sin(t*2)));});pd.forEach((p,i)=>p.material.opacity=.3+.5*Math.abs(Math.sin(t+i*.4)));gm.emissiveIntensity=.4+Math.sin(t*3)*.2;R.render(sc,cam);})();
+}
+
+/* ULTRASONIC */
+function bUS(){
+  const R=mkR('us3d',330,330);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,1,.1,100);
+  cam.position.set(0,1.5,5);cam.lookAt(0,0,0);
+  sc.add(new THREE.AmbientLight(0x112233,2));const dl_us=new THREE.DirectionalLight(0x00f5ff,3);dl_us.position.set(2,4,2);sc.add(dl_us);
+  const dl2=new THREE.DirectionalLight(0x00f5ff,3);dl2.position.set(2,4,2);sc.add(dl2);
+  const sm=new THREE.MeshLambertMaterial({color:0x1a3050});
+  const bodyMesh=new THREE.Mesh(new THREE.BoxGeometry(1.6,.3,.5),sm);bodyMesh.position.y=-.1;sc.add(bodyMesh);
+  [[-.4,0x00f5ff],[.4,0x4f8ef7]].forEach(([x,col])=>{const c=new THREE.Mesh(new THREE.CylinderGeometry(.18,.18,.25,24),new THREE.MeshLambertMaterial({color:col,emissive:col,emissiveIntensity:.3}));c.rotation.x=Math.PI/2;c.position.set(x,.02,.3);sc.add(c);});
+  const wr=Array.from({length:6},(_,i)=>{const w=new THREE.Mesh(new THREE.RingGeometry(.05,.07,32),new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:0,side:THREE.DoubleSide}));w.rotation.x=-Math.PI/6;w.position.set(0,.3,.35);w.userData.life=i/6;sc.add(w);return w;});
+  const wall=new THREE.Mesh(new THREE.BoxGeometry(2,.8,.1),new THREE.MeshLambertMaterial({color:0x203050,transparent:true,opacity:.5}));wall.position.set(0,.2,-2.5);sc.add(wall);
+  const lg=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,.2,-2.5),new THREE.Vector3(0,.2,.3)]);
+  const line=new THREE.Line(lg,new THREE.LineBasicMaterial({color:0x00e87a,transparent:true,opacity:.7}));sc.add(line);
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.016;wr.forEach(w=>{w.userData.life+=.018;if(w.userData.life>1)w.userData.life=0;const s=1+w.userData.life*6;w.scale.set(s,s,1);w.material.opacity=(1-w.userData.life)*.38;});line.material.opacity=.3+.4*Math.abs(Math.sin(t*3));sc.rotation.y=Math.sin(t*.3)*.3;R.render(sc,cam);})();
+}
+
+/* CAMERA */
+function bCam(){
+  const R=mkR('cam3d',350,290);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(60,350/290,.1,100);
+  sc.background=new THREE.Color(0x010810);cam.position.set(0,0,5);
+  sc.add(new THREE.AmbientLight(0x112244,2));const dl=new THREE.DirectionalLight(0x00e87a,2);dl.position.set(1,3,2);sc.add(dl);
+  const cb=new THREE.Mesh(new THREE.BoxGeometry(2,1.2,.6),new THREE.MeshLambertMaterial({color:0x0a1a2e}));sc.add(cb);
+  const lens=new THREE.Mesh(new THREE.CylinderGeometry(.35,.4,.5,24),new THREE.MeshLambertMaterial({color:0x0d2030,emissive:0x001a2a,emissiveIntensity:.5}));lens.rotation.x=Math.PI/2;lens.position.z=.5;sc.add(lens);
+  const glare=new THREE.Mesh(new THREE.CircleGeometry(.28,24),new THREE.MeshBasicMaterial({color:0x00e87a,transparent:true,opacity:.15}));glare.position.z=.76;sc.add(glare);
+  const boxes=[[0x00e87a,-.8,.3],[0xff4560,.5,-.1],[0xffb830,-.3,-.4]].map(([col,x,y])=>{
+    const f=new THREE.Group();f.position.set(x,y,1.5);
+    const e=new THREE.EdgesGeometry(new THREE.BoxGeometry(.55,.35,.01));
+    f.add(new THREE.LineSegments(e,new THREE.LineBasicMaterial({color:col,transparent:true,opacity:.8})));
+    f.userData.col=col;sc.add(f);return f;
+  });
+  const sp=new THREE.Mesh(new THREE.PlaneGeometry(3,.04),new THREE.MeshBasicMaterial({color:0x00e87a,transparent:true,opacity:.5,side:THREE.DoubleSide}));sp.position.z=1.6;sc.add(sp);
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.016;sp.position.y=-.6+((t*.4)%1.2);boxes.forEach((b,i)=>{b.children[0].material.opacity=.5+.3*Math.sin(t*2+i);b.scale.set(1+Math.sin(t+i)*.04,1+Math.sin(t+i)*.04,1);});glare.material.opacity=.1+.1*Math.sin(t*4);sc.rotation.y=Math.sin(t*.2)*.15;R.render(sc,cam);})();
+}
+
+/* GPS */
+function bGPS(){
+  const R=mkR('gps3d',330,330);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,1,.1,100);
+  cam.position.set(0,2,5);cam.lookAt(0,0,0);
+  sc.add(new THREE.AmbientLight(0x112200,1.5));sc.add(new THREE.DirectionalLight(0xffb830,3));
+  const earth=new THREE.Mesh(new THREE.SphereGeometry(1.2,32,32),new THREE.MeshLambertMaterial({color:0x0a2244}));sc.add(earth);
+  const wf=new THREE.Mesh(new THREE.SphereGeometry(1.21,20,20),new THREE.MeshBasicMaterial({color:0x142040,wireframe:true,transparent:true,opacity:.35}));sc.add(wf);
+  const ground=new THREE.Mesh(new THREE.SphereGeometry(.09,8,8),new THREE.MeshBasicMaterial({color:0xff4560}));ground.position.set(.6,-.9,.7);sc.add(ground);
+  const pr=new THREE.Mesh(new THREE.RingGeometry(.11,.15,16),new THREE.MeshBasicMaterial({color:0xff4560,transparent:true,opacity:.7,side:THREE.DoubleSide}));pr.position.copy(ground.position);pr.lookAt(cam.position);sc.add(pr);
+  const sats=[[0xffb830,2.4,0],[0x00f5ff,2.8,.8],[0x00e87a,2.2,1.6],[0xbf5fff,3,2.4]].map(([col,r,ph])=>{
+    const s=new THREE.Mesh(new THREE.BoxGeometry(.14,.07,.28),new THREE.MeshLambertMaterial({color:col,emissive:col,emissiveIntensity:.4}));s.userData={r,ph};
+    const lg2=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+    const ln=new THREE.Line(lg2,new THREE.LineBasicMaterial({color:col,transparent:true,opacity:.35}));s.userData.ln=ln;sc.add(s);sc.add(ln);return s;
+  });
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.012;earth.rotation.y=t*.1;wf.rotation.y=t*.1;
+  sats.forEach(s=>{const a=t*.5+s.userData.ph;s.position.set(Math.cos(a)*s.userData.r,Math.sin(a*.6)*.8,Math.sin(a)*s.userData.r);s.lookAt(0,0,0);
+  const pos=s.userData.ln.geometry.attributes.position;pos.setXYZ(0,s.position.x,s.position.y,s.position.z);pos.setXYZ(1,ground.position.x,ground.position.y,ground.position.z);pos.needsUpdate=true;s.userData.ln.material.opacity=.2+.2*Math.abs(Math.sin(t*2+s.userData.ph));});
+  const ps=1+Math.sin(t*3)*.3;pr.scale.set(ps,ps,1);pr.material.opacity=.5+.3*Math.sin(t*3);R.render(sc,cam);})();
+}
+
+/* TINYML */
+function bTML(){
+  const R=mkR('tml3d',350,310);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,350/310,.1,100);
+  cam.position.set(0,1,6);cam.lookAt(0,0,0);
+  sc.add(new THREE.AmbientLight(0x110022,2));sc.add(new THREE.DirectionalLight(0xbf5fff,3));
+  sc.add(new THREE.Mesh(new THREE.BoxGeometry(2,.05,3),new THREE.MeshLambertMaterial({color:0x1a0030})));
+  const chip=new THREE.Mesh(new THREE.BoxGeometry(.5,.1,.5),new THREE.MeshLambertMaterial({color:0x0a0018,emissive:0x220044,emissiveIntensity:.8}));chip.position.y=.08;sc.add(chip);
+  const layers=[[3],[5],[5],[3],[2]],cols=[0x00f5ff,0xbf5fff,0xbf5fff,0xffb830,0x00e87a];
+  const nodes=[];layers.forEach((l,li)=>l.forEach((_,ni)=>{const n=new THREE.Mesh(new THREE.SphereGeometry(.1,8,8),new THREE.MeshBasicMaterial({color:cols[li],transparent:true,opacity:.8}));n.position.set((li-2)*1.1,(ni-l.length/2+.5)*.6,2);n.userData={li,ni};nodes.push(n);sc.add(n);}));
+  const lm2=new THREE.LineBasicMaterial({color:0x332255,transparent:true,opacity:.25});
+  layers.forEach((l,li)=>{if(li===layers.length-1)return;l.forEach((_,ni)=>{layers[li+1].forEach((_2,ni2)=>{const a=nodes.find(n=>n.userData.li===li&&n.userData.ni===ni),b=nodes.find(n=>n.userData.li===li+1&&n.userData.ni===ni2);if(a&&b)sc.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([a.position.clone(),b.position.clone()]),lm2));});});});
+  let t=0,al=0;(function loop(){requestAnimationFrame(loop);t+=.016;sc.rotation.y=Math.sin(t*.3)*.25;if(Math.floor(t*1.5)>Math.floor((t-.016)*1.5))al=(al+1)%layers.length;nodes.forEach(n=>{const act=n.userData.li===al;n.material.opacity=act?1:.35;const s=act?1+Math.sin(t*5)*.15:1;n.scale.set(s,s,s);});chip.material.emissiveIntensity=.5+Math.sin(t*6)*.3;R.render(sc,cam);})();
+}
+
+/* HAPTIC */
+function bHap(){
+  const R=mkR('hap3d',330,310);if(!R)return;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(55,330/310,.1,100);
+  cam.position.set(0,0,5);cam.lookAt(0,0,0);
+  sc.add(new THREE.AmbientLight(0x220011,2));sc.add(new THREE.DirectionalLight(0xff4560,3));
+  const wm=new THREE.MeshLambertMaterial({color:0x1a0010});
+  const wrist=new THREE.Mesh(new THREE.TorusGeometry(1,.25,16,40),wm);wrist.rotation.x=Math.PI/3;sc.add(wrist);
+  const motorM=new THREE.MeshLambertMaterial({color:0x330022,emissive:0xff1133,emissiveIntensity:.4});
+  const motor=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.25,16),motorM);motor.rotation.z=Math.PI/2;motor.position.set(0,1,.25);sc.add(motor);
+  const ripples=Array.from({length:5},(_,i)=>{const r=new THREE.Mesh(new THREE.RingGeometry(.3,.32,32),new THREE.MeshBasicMaterial({color:0xff4560,transparent:true,opacity:0,side:THREE.DoubleSide}));r.position.set(0,1,.3);r.rotation.x=Math.PI/3;r.userData.ph=i/5;sc.add(r);return r;});
+  const spkWaves=Array.from({length:4},(_,i)=>{const a=new THREE.Mesh(new THREE.TorusGeometry(.3+i*.2,.02,8,24,Math.PI),new THREE.MeshBasicMaterial({color:0x4f8ef7,transparent:true,opacity:.55-i*.1}));a.position.set(-1.5,0,0);a.rotation.z=-Math.PI/2;a.userData.i=i;sc.add(a);return a;});
+  let t=0;(function loop(){requestAnimationFrame(loop);t+=.016;wrist.rotation.x=Math.PI/3+Math.sin(t*8)*.03;motorM.emissiveIntensity=.3+.4*Math.abs(Math.sin(t*8));ripples.forEach(r=>{r.userData.ph=(r.userData.ph+.012)%1;const s=1+r.userData.ph*3;r.scale.set(s,s,1);r.material.opacity=(1-r.userData.ph)*.45;});spkWaves.forEach(w=>{w.material.opacity=(.55-w.userData.i*.1)*(.5+.5*Math.abs(Math.sin(t*3+w.userData.i*.4)));w.scale.set(1+Math.sin(t*3+w.userData.i)*.1,1+Math.sin(t*3+w.userData.i)*.1,1);});sc.rotation.y=Math.sin(t*.25)*.3;R.render(sc,cam);})();
+}
+
+/* DEMO */
+function bDemo(){
+  const W=innerWidth,H=innerHeight-64;
+  const R=mkR('demo3d',W,H);if(!R)return;
+  R.shadowMap.enabled=true;
+  const sc=new THREE.Scene(),cam=new THREE.PerspectiveCamera(65,W/H,.1,100);
+  cam.position.set(0,2.5,7);cam.lookAt(0,.5,0);
+  sc.add(new THREE.AmbientLight(0x102030,1.5));
+  const dl=new THREE.DirectionalLight(0x00f5ff,2);dl.position.set(2,6,3);dl.castShadow=true;sc.add(dl);
+  const fl=new THREE.Mesh(new THREE.PlaneGeometry(20,20),new THREE.MeshLambertMaterial({color:0x060d1a}));
+  fl.rotation.x=-Math.PI/2;fl.position.y=-1.8;fl.receiveShadow=true;sc.add(fl);
+  sc.add(new THREE.GridHelper(20,20,0x142040,0x0d1e35));
+  const pm=new THREE.MeshLambertMaterial({color:0x1a3a6e}),gm2=new THREE.MeshLambertMaterial({color:0x00f5ff,emissive:0x00a0bb,emissiveIntensity:.5}),hm2=new THREE.MeshLambertMaterial({color:0x2a5a8e});
+  const pH=new THREE.Mesh(new THREE.SphereGeometry(.18,10,10),hm2);pH.position.y=1.5;
+  const pT=new THREE.Mesh(new THREE.CylinderGeometry(.14,.16,.65,10),pm);pT.position.y=.85;
+  const pLL=new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.55,8),pm);pLL.position.set(-.08,.2,0);
+  const pRL=new THREE.Mesh(new THREE.CylinderGeometry(.06,.05,.55,8),pm);pRL.position.set(.08,.2,0);
+  const pAL=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.42,8),pm);pAL.position.set(-.22,.8,0);pAL.rotation.z=.3;
+  const pAR=new THREE.Mesh(new THREE.CylinderGeometry(.045,.045,.42,8),pm);pAR.position.set(.22,.8,0);pAR.rotation.z=-.3;
+  [[-.1,1.52,.16,-.12],[.1,1.52,.16,.12]].forEach(([x,y,z,ry])=>{const g=new THREE.Mesh(new THREE.TorusGeometry(.08,.025,8,20),gm2);g.position.set(x,y,z);g.rotation.y=ry*.5;pH.parent||sc.add(pH);pT.parent||sc.add(pT);g.parent||sc.add(g);});
+  const person=new THREE.Group();[pH,pT,pLL,pRL,pAL,pAR].forEach(m=>{m.castShadow=true;person.add(m);});
+  person.position.set(-2,-1.8,1);sc.add(person);
+  const gl=[new THREE.Mesh(new THREE.TorusGeometry(.08,.025,8,20),gm2),new THREE.Mesh(new THREE.TorusGeometry(.08,.025,8,20),gm2)];
+  gl[0].position.set(-2-.1,1.52-1.8+1,1+.16);gl[1].position.set(-2+.1,1.52-1.8+1,1+.16);sc.add(gl[0]);sc.add(gl[1]);
+
+  const obsD=[{x:1,z:-1,col:0xff4560,w:.5,h:.8,lbl:'CHAIR'},{x:2.5,z:.5,col:0xffb830,w:.2,h:1.8,lbl:'DOOR'},{x:-.5,z:-2,col:0x4f8ef7,w:.7,h:.5,lbl:'TABLE'}];
+  const obstacles=obsD.map(d=>{
+    const geo=new THREE.BoxGeometry(d.w,d.h,.4),mat=new THREE.MeshLambertMaterial({color:d.col,transparent:true,opacity:.6});
+    const m=new THREE.Mesh(geo,mat);m.position.set(d.x,d.h/2-1.8,d.z);m.castShadow=true;m.userData=d;
+    m.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo),new THREE.LineBasicMaterial({color:d.col})));sc.add(m);return m;
+  });
+  const sw=Array.from({length:5},(_,i)=>{const w=new THREE.Mesh(new THREE.RingGeometry(.1,.14,32),new THREE.MeshBasicMaterial({color:0x00f5ff,transparent:true,opacity:0,side:THREE.DoubleSide}));w.rotation.x=-Math.PI/2;w.userData.life=i/5;sc.add(w);return w;});
+  const hudD=[{lbl:'CHAIR',dist:'0.8 m',conf:'94%',haptic:'● ● ●  FAST',pct:'65%'},{lbl:'DOOR',dist:'1.5 m',conf:'88%',haptic:'● ●  MEDIUM',pct:'38%'},{lbl:'TABLE',dist:'2.1 m',conf:'91%',haptic:'●  SLOW',pct:'25%'}];
+  let t=0,oi=0,lt=0;
+  (function loop(){requestAnimationFrame(loop);t+=.016;
+  pLL.rotation.x=Math.sin(t*2)*.3;pRL.rotation.x=Math.sin(t*2+Math.PI)*.3;pAL.rotation.x=Math.sin(t*2+Math.PI)*.2;pAR.rotation.x=Math.sin(t*2)*.2;pH.position.y=1.5+Math.sin(t*2)*.02;
+  person.position.x=-2+Math.sin(t*.3)*.4;person.position.z=1+Math.sin(t*.2)*.3;person.rotation.y=Math.sin(t*.15)*.4;
+  gl[0].position.set(person.position.x-.1,person.position.y+1.52-1.8+1,person.position.z+.16);
+  gl[1].position.set(person.position.x+.1,person.position.y+1.52-1.8+1,person.position.z+.16);
+  gm2.emissiveIntensity=.4+Math.sin(t*4)*.2;
+  sw.forEach(w=>{w.userData.life+=.014;if(w.userData.life>1)w.userData.life=0;const s=.5+w.userData.life*5;w.scale.set(s,s,1);w.material.opacity=(1-w.userData.life)*.3;w.position.set(person.position.x,-1.78,person.position.z);});
+  if(t-lt>3){lt=t;oi=(oi+1)%3;}
+  obstacles.forEach((ob,i)=>{ob.material.opacity=i===oi?.72:.42;if(i===oi){const ps=1+Math.sin(t*4)*.04;ob.scale.set(ps,1,ps);}else ob.scale.set(1,1,1);});
+  const d=hudD[oi];
+  const dD=document.getElementById('dDist'),dDB=document.getElementById('dDistB');
+  const dC=document.getElementById('dConf'),dCB=document.getElementById('dConfB');
+  const dL=document.getElementById('dLabel'),dH=document.getElementById('dHaptic');
+  if(dD)dD.textContent=d.dist;if(dDB)dDB.style.width=d.pct;if(dC)dC.textContent=d.conf;if(dCB)dCB.style.width=d.conf;if(dL)dL.textContent=d.lbl;if(dH)dH.textContent=d.haptic;
+  cam.position.x=Math.sin(t*.15);cam.lookAt(0,.5,0);R.render(sc,cam);})();
+}
+
+const builders=[bHero,bPerson,bUS,bCam,bGPS,bTML,bHap,noOp,bDemo,noOp];
+bHero();
+</script>
+</body>
+</html>
